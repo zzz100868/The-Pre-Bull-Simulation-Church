@@ -63,7 +63,7 @@ app.post("/api/round", async (_req, res) => {
     let persuader: Agent;
     let isMissionary = false;
     const missionaries = getMissionaryAgents();
-    if (missionaries.length > 0 && Math.random() < 0.4) {
+    if (missionaries.length > 0 && Math.random() < 0.6) {
       persuader = missionaries[Math.floor(Math.random() * missionaries.length)];
       persuader.missionaryCount += 1;
       isMissionary = true;
@@ -190,21 +190,19 @@ app.post("/api/round", async (_req, res) => {
     };
     addDebate(debate);
 
-    // ====== 10. 生成新闻和经文 (#10 #18) ======
+    // ====== 10. 生成新闻和经文 (#10 #18) — 每轮都生成 ======
     let newsItem = null;
-    if (roundNum % 2 === 0 || converted) {
-      try {
-        newsItem = await generateFutureNews(agents, roundNum, getConvertedRatio());
-        addNews(newsItem);
-      } catch (e) { console.error("News generation failed:", e); }
-    }
+    try {
+      newsItem = await generateFutureNews(agents, roundNum, getConvertedRatio());
+      addNews(newsItem);
+    } catch (e) { console.error("News generation failed:", e); }
+
     let scripture = null;
-    if (converted && (roundNum % 3 === 0 || getConvertedRatio() > 0.5)) {
-      try {
-        scripture = await generateScripture(agents, roundNum, events.join("; "));
-        addScripture(scripture);
-      } catch (e) { console.error("Scripture generation failed:", e); }
-    }
+    try {
+      const event = events.length > 0 ? events.join("; ") : `第${roundNum}轮辩论进行中`;
+      scripture = await generateScripture(agents, roundNum, event);
+      addScripture(scripture);
+    } catch (e) { console.error("Scripture generation failed:", e); }
 
     // ====== 11. #15 多教派辩论 (每5轮触发一次) ======
     let factionDebateRecord = null;

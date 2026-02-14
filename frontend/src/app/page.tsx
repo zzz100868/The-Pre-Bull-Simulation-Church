@@ -35,17 +35,171 @@ const Ic = {
   ghost: (c = "w-5 h-5") => <svg className={c} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 10h.01M15 10h.01M12 2a8 8 0 0 0-8 8v12l3-3 2 2 3-3 3 3 2-2 3 3V10a8 8 0 0 0-8-8z" fill="currentColor" fillOpacity=".06"/></svg>,
 };
 
-/* ---------- Background ---------- */
+/* ---------- Starfield Canvas Background ---------- */
+function Starfield() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    let W = 0, H = 0;
+    const resize = () => { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; };
+    resize();
+    window.addEventListener("resize", resize);
+
+    // Mouse parallax
+    let mouseX = 0.5, mouseY = 0.5;
+    const onMouse = (e: MouseEvent) => { mouseX = e.clientX / W; mouseY = e.clientY / H; };
+    window.addEventListener("mousemove", onMouse);
+
+    // 3-layer star system: far(slow), mid, near(fast)
+    interface Star { x: number; y: number; r: number; baseA: number; twinkleSpeed: number; color: string; layer: number; driftX: number; driftY: number; }
+    const stars: Star[] = [];
+    const colors = ["rgba(255,255,255,", "rgba(200,220,255,", "rgba(255,240,220,", "rgba(180,200,255,", "rgba(220,200,255,"];
+    const layerSpeeds = [0.08, 0.2, 0.45]; // px/frame drift speed per layer
+    const layerParallax = [0.005, 0.015, 0.035]; // mouse parallax factor per layer
+
+    for (let i = 0; i < 320; i++) {
+      const layer = i < 180 ? 0 : i < 270 ? 1 : 2; // 180 far, 90 mid, 50 near
+      const r = layer === 0 ? 0.3 + Math.random() * 0.6 : layer === 1 ? 0.5 + Math.random() * 1 : 1 + Math.random() * 1.8;
+      // Random drift direction
+      const angle = Math.random() * Math.PI * 2;
+      const speed = layerSpeeds[layer] * (0.5 + Math.random() * 1);
+      stars.push({
+        x: Math.random() * W, y: Math.random() * H, r,
+        baseA: layer === 0 ? 0.2 + Math.random() * 0.4 : layer === 1 ? 0.4 + Math.random() * 0.5 : 0.6 + Math.random() * 0.4,
+        twinkleSpeed: 0.3 + Math.random() * 2,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        layer,
+        driftX: Math.cos(angle) * speed,
+        driftY: Math.sin(angle) * speed,
+      });
+    }
+
+    // Shooting stars
+    let shootingStar: { x: number; y: number; len: number; speed: number; angle: number; life: number; maxLife: number } | null = null;
+    let shootTimer = 0;
+
+    let animId: number;
+    const draw = (time: number) => {
+      ctx.clearRect(0, 0, W, H);
+
+      // Update & draw stars
+      for (const s of stars) {
+        // Drift movement
+        s.x += s.driftX;
+        s.y += s.driftY;
+        // Wrap around edges with padding
+        if (s.x < -10) s.x = W + 10;
+        if (s.x > W + 10) s.x = -10;
+        if (s.y < -10) s.y = H + 10;
+        if (s.y > H + 10) s.y = -10;
+
+        // Mouse parallax offset
+        const px = (mouseX - 0.5) * W * layerParallax[s.layer];
+        const py = (mouseY - 0.5) * H * layerParallax[s.layer];
+        const dx = s.x + px;
+        const dy = s.y + py;
+
+        // Twinkle
+        const twinkle = Math.sin(time * 0.001 * s.twinkleSpeed + s.x * 0.01) * 0.35 + 0.65;
+        const alpha = s.baseA * twinkle;
+
+        ctx.beginPath();
+        ctx.arc(dx, dy, s.r, 0, Math.PI * 2);
+        ctx.fillStyle = s.color + alpha.toFixed(2) + ")";
+        ctx.fill();
+
+        // Large star cross-glow
+        if (s.r > 1.5) {
+          const glowR = s.r * 4;
+          const g = ctx.createRadialGradient(dx, dy, 0, dx, dy, glowR);
+          g.addColorStop(0, s.color + (alpha * 0.25).toFixed(2) + ")");
+          g.addColorStop(0.5, s.color + (alpha * 0.08).toFixed(2) + ")");
+          g.addColorStop(1, s.color + "0)");
+          ctx.beginPath();
+          ctx.arc(dx, dy, glowR, 0, Math.PI * 2);
+          ctx.fillStyle = g;
+          ctx.fill();
+          // Diffraction spikes for brightest stars
+          if (s.r > 2.2) {
+            ctx.save();
+            ctx.globalAlpha = alpha * 0.3;
+            ctx.strokeStyle = s.color + "0.5)";
+            ctx.lineWidth = 0.5;
+            const spikeLen = s.r * 8;
+            for (let a = 0; a < 4; a++) {
+              const sa = a * Math.PI / 4 + time * 0.0001;
+              ctx.beginPath();
+              ctx.moveTo(dx - Math.cos(sa) * spikeLen, dy - Math.sin(sa) * spikeLen);
+              ctx.lineTo(dx + Math.cos(sa) * spikeLen, dy + Math.sin(sa) * spikeLen);
+              ctx.stroke();
+            }
+            ctx.restore();
+          }
+        }
+      }
+
+      // Shooting star
+      shootTimer++;
+      if (!shootingStar && shootTimer > 200 && Math.random() < 0.012) {
+        shootTimer = 0;
+        const angle = Math.PI * 0.12 + Math.random() * Math.PI * 0.25;
+        shootingStar = {
+          x: Math.random() * W * 0.8,
+          y: Math.random() * H * 0.35,
+          len: 80 + Math.random() * 100,
+          speed: 8 + Math.random() * 6,
+          angle, life: 0, maxLife: 35 + Math.random() * 30,
+        };
+      }
+      if (shootingStar) {
+        const ss = shootingStar;
+        ss.x += Math.cos(ss.angle) * ss.speed;
+        ss.y += Math.sin(ss.angle) * ss.speed;
+        ss.life++;
+        const progress = ss.life / ss.maxLife;
+        const fadeAlpha = progress < 0.2 ? progress / 0.2 : 1 - (progress - 0.2) / 0.8;
+        const endX = ss.x - Math.cos(ss.angle) * ss.len;
+        const endY = ss.y - Math.sin(ss.angle) * ss.len;
+        const grad = ctx.createLinearGradient(ss.x, ss.y, endX, endY);
+        grad.addColorStop(0, `rgba(255,255,255,${(fadeAlpha * 0.95).toFixed(2)})`);
+        grad.addColorStop(0.3, `rgba(200,220,255,${(fadeAlpha * 0.5).toFixed(2)})`);
+        grad.addColorStop(1, "rgba(200,220,255,0)");
+        ctx.beginPath();
+        ctx.moveTo(ss.x, ss.y);
+        ctx.lineTo(endX, endY);
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+        // Head glow
+        ctx.beginPath();
+        ctx.arc(ss.x, ss.y, 2, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,255,255,${(fadeAlpha * 0.8).toFixed(2)})`;
+        ctx.fill();
+        if (ss.life >= ss.maxLife) shootingStar = null;
+      }
+      animId = requestAnimationFrame(draw);
+    };
+    animId = requestAnimationFrame(draw);
+    return () => { cancelAnimationFrame(animId); window.removeEventListener("resize", resize); window.removeEventListener("mousemove", onMouse); };
+  }, []);
+  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none" style={{ zIndex: -1 }} />;
+}
+
 function Background() {
   return (
-    <div className="fixed inset-0 pointer-events-none overflow-hidden" style={{ zIndex: -1 }}>
-      <div className="bg-orb bg-orb-1" />
-      <div className="bg-orb bg-orb-2" />
-      <div className="bg-orb bg-orb-3" />
-      {Array.from({ length: 8 }, (_, i) => (
-        <div key={i} className={`particle particle-${i + 1}`} />
-      ))}
-    </div>
+    <>
+      <Starfield />
+      <div className="fixed inset-0 pointer-events-none overflow-hidden" style={{ zIndex: -2 }}>
+        <div className="bg-orb bg-orb-1" />
+        <div className="bg-orb bg-orb-2" />
+        <div className="bg-orb bg-orb-3" />
+        <div className="bg-orb bg-orb-4" />
+        <div className="bg-orb bg-orb-5" />
+      </div>
+    </>
   );
 }
 
@@ -171,11 +325,22 @@ function AnimNum({ value, prefix = "", suffix = "" }: { value: number; prefix?: 
   return <>{prefix}{display.toLocaleString()}{suffix}</>;
 }
 
-function StatCard({ icon, label, value, sub, delay = 0 }: {
-  icon: React.ReactNode; label: string; value: string | number; sub?: string; delay?: number;
+function StatCard({ icon, label, value, sub, delay = 0, accent = "emerald" }: {
+  icon: React.ReactNode; label: string; value: string | number; sub?: string; delay?: number; accent?: string;
 }) {
+  const accentMap: Record<string, { text: string; hoverText: string; bg: string; border: string; glow: string }> = {
+    emerald: { text: "text-emerald-400/70", hoverText: "group-hover:text-emerald-400", bg: "bg-emerald-500/8", border: "hover:border-emerald-500/20", glow: "hover:shadow-[0_0_20px_rgba(0,255,136,0.08)]" },
+    blue:    { text: "text-blue-400/70",    hoverText: "group-hover:text-blue-400",    bg: "bg-blue-500/8",    border: "hover:border-blue-500/20",    glow: "hover:shadow-[0_0_20px_rgba(59,130,246,0.08)]" },
+    amber:   { text: "text-amber-400/70",   hoverText: "group-hover:text-amber-400",   bg: "bg-amber-500/8",   border: "hover:border-amber-500/20",   glow: "hover:shadow-[0_0_20px_rgba(245,158,11,0.08)]" },
+    violet:  { text: "text-violet-400/70",  hoverText: "group-hover:text-violet-400",  bg: "bg-violet-500/8",  border: "hover:border-violet-500/20",  glow: "hover:shadow-[0_0_20px_rgba(139,92,246,0.08)]" },
+    cyan:    { text: "text-cyan-400/70",    hoverText: "group-hover:text-cyan-400",    bg: "bg-cyan-500/8",    border: "hover:border-cyan-500/20",    glow: "hover:shadow-[0_0_20px_rgba(6,182,212,0.08)]" },
+    rose:    { text: "text-rose-400/70",    hoverText: "group-hover:text-rose-400",    bg: "bg-rose-500/8",    border: "hover:border-rose-500/20",    glow: "hover:shadow-[0_0_20px_rgba(244,63,94,0.08)]" },
+    indigo:  { text: "text-indigo-400/70",  hoverText: "group-hover:text-indigo-400",  bg: "bg-indigo-500/8",  border: "hover:border-indigo-500/20",  glow: "hover:shadow-[0_0_20px_rgba(99,102,241,0.08)]" },
+    slate:   { text: "text-slate-400/70",   hoverText: "group-hover:text-slate-300",   bg: "bg-slate-500/8",   border: "hover:border-slate-400/20",   glow: "hover:shadow-[0_0_20px_rgba(148,163,184,0.06)]" },
+  };
+  const a = accentMap[accent] || accentMap.emerald;
   return (
-    <div className="glass glass-hover rounded-2xl p-5 animate-fade-in-up group" style={{ animationDelay: `${delay}ms` }}>
+    <div className={`glass rounded-2xl p-5 animate-fade-in-up group transition-all duration-300 ${a.border} ${a.glow}`} style={{ animationDelay: `${delay}ms` }}>
       <div className="flex items-start justify-between">
         <div>
           <p className="text-[11px] font-medium text-slate-500 uppercase tracking-widest mb-1">{label}</p>
@@ -184,7 +349,7 @@ function StatCard({ icon, label, value, sub, delay = 0 }: {
           </p>
           {sub && <p className="text-xs text-slate-500 mt-1">{sub}</p>}
         </div>
-        <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center text-emerald-400/70 group-hover:text-emerald-400 transition-colors">{icon}</div>
+        <div className={`w-9 h-9 rounded-xl ${a.bg} flex items-center justify-center ${a.text} ${a.hoverText} transition-colors`}>{icon}</div>
       </div>
     </div>
   );
@@ -388,13 +553,20 @@ function NewsTicker({ news }: { news: NewsItem[] }) {
 }
 
 /* ---------- #18 Scripture Display ---------- */
-function ScriptureDisplay({ scriptures }: { scriptures: Scripture[] }) {
-  if (scriptures.length === 0) return null;
+function ScriptureDisplay({ scriptures, onGenerate }: { scriptures: Scripture[]; onGenerate?: () => void }) {
   return (
     <div className="glass rounded-2xl p-5 animate-fade-in-up">
-      <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-        {Ic.book("w-4 h-4 text-amber-400")} 教会经文
-      </h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+          {Ic.book("w-4 h-4 text-amber-400")} 教会经文
+        </h3>
+        {onGenerate && (
+          <button onClick={onGenerate} className="text-[10px] px-2 py-1 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors border border-amber-500/20">
+            ✦ 生成经文
+          </button>
+        )}
+      </div>
+      {scriptures.length === 0 && <p className="text-[11px] text-slate-600 text-center py-4">暂无经文 — 点击生成或继续辩论</p>}
       <div className="space-y-3 max-h-48 overflow-y-auto">
         {scriptures.map((s) => (
           <div key={s.id} className="bg-white/[0.02] rounded-lg border border-amber-500/10 p-3">
@@ -444,7 +616,7 @@ function AllianceDisplay({ alliances, agents }: { alliances: Alliance[]; agents:
 }
 
 /* ---------- Agent Card (enhanced) ---------- */
-function AgentCard({ agent, isActive }: { agent: Agent; isActive: boolean }) {
+function AgentCard({ agent, isActive, onApostasy }: { agent: Agent; isActive: boolean; onApostasy?: (id: string) => void }) {
   const isConverted = agent.stage === "S3" || agent.stage === "S4";
   const stageConf = STAGE_CONFIG[agent.stage] || STAGE_CONFIG.S0;
   const factionConf = FACTION_CONFIG[agent.faction] || FACTION_CONFIG.neutral;
@@ -496,12 +668,20 @@ function AgentCard({ agent, isActive }: { agent: Agent; isActive: boolean }) {
       </div>
 
       {/* #6 Token Weight + #5 Task Rewards */}
-      {(agent.voteWeight > 0 || agent.taskRewards > 0) && (
+      {(agent.voteWeight > 0 || agent.taskRewards > 0 || agent.allianceId) && (
         <div className="flex gap-3 mt-2 pt-2 border-t border-white/5 text-[10px] text-slate-500">
           {agent.voteWeight > 0 && <span className="flex items-center gap-1">{Ic.shield("w-3 h-3 text-cyan-400")} 权重 {agent.voteWeight}</span>}
           {agent.taskRewards > 0 && <span className="flex items-center gap-1">{Ic.sparkles("w-3 h-3 text-violet-400")} 任务 +{agent.taskRewards}</span>}
           {agent.allianceId && <span className="flex items-center gap-1">{Ic.link("w-3 h-3 text-violet-400")} 联盟</span>}
         </div>
+      )}
+
+      {/* #14 Apostasy - 叛教按钮 (仅已皈依 agent 可用) */}
+      {isConverted && onApostasy && (
+        <button onClick={() => onApostasy(agent.id)}
+          className="w-full mt-2 text-[10px] py-1.5 rounded-lg bg-rose-500/5 text-rose-400/60 hover:bg-rose-500/15 hover:text-rose-400 transition-all border border-rose-500/10 hover:border-rose-500/30">
+          ⚡ 触发叛教
+        </button>
       )}
     </div>
   );
@@ -696,7 +876,6 @@ export default function Home() {
   const [alliances, setAlliances] = useState<Alliance[]>([]);
   const [conclusion, setConclusion] = useState<ExperimentConclusion | null>(null);
   const [events, setEvents] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<"arena" | "analytics">("arena");
 
   const apiCall = useCallback(
     async (path: string, method: "GET" | "POST" = "GET", body?: any) => {
@@ -746,6 +925,23 @@ export default function Home() {
     finally { setLoading(false); }
   }, [apiCall]);
 
+  const handleGenerateScripture = useCallback(async () => {
+    try {
+      const s = await apiCall("/api/generate-scripture", "POST");
+      setScriptures((prev) => [s, ...prev]);
+    } catch (e: any) { setError(e.message); }
+  }, [apiCall]);
+
+  const handleApostasy = useCallback(async (agentId: string) => {
+    try {
+      const data = await apiCall("/api/apostasy", "POST", { agentId });
+      setAgents((prev) => prev.map((a) => a.id === agentId ? data.agent : a));
+      if (data.metrics) setMetrics(data.metrics);
+      if (data.conclusion) setConclusion(data.conclusion);
+      setEvents((prev) => [data.message, ...prev]);
+    } catch (e: any) { setError(e.message); }
+  }, [apiCall]);
+
   // ==================== Landing ====================
 
   if (!started) {
@@ -770,23 +966,9 @@ export default function Home() {
 
           <h1 className="text-4xl font-bold mb-2 gradient-text">牛市预演教</h1>
           <p className="text-base text-slate-400 mb-1 font-medium tracking-wide">Pre-Bull Simulation Church</p>
-          <p className="text-sm text-slate-600 mb-6 leading-relaxed">
-            AI Agent 叙事说服实验 · 完整版<br/>
-            <span className="text-slate-500">19项功能全部解锁</span>
+          <p className="text-sm text-slate-600 mb-8 leading-relaxed">
+            AI Agent 叙事说服实验 · 完整版
           </p>
-
-          {/* Feature Grid */}
-          <div className="grid grid-cols-3 gap-2 mb-8 text-[10px] text-slate-500 max-w-sm mx-auto">
-            {[
-              "精神市值", "时间线切换", "实验结论", "叙事偏差", "多元Token", "Token权重",
-              "多策略组合", "历史案例", "行为榜单", "未来新闻", "反驳模板", "策略统计",
-              "阵营流动", "5步协议", "教派辩论", "联盟分裂", "传教士", "经文预言", "风险声明",
-            ].map((f) => (
-              <span key={f} className="px-2 py-1 rounded bg-white/[0.03] border border-white/5 flex items-center gap-1">
-                <span className="w-1 h-1 rounded-full bg-emerald-400" />{f}
-              </span>
-            ))}
-          </div>
 
           <button onClick={handleStart} disabled={loading} className="btn-primary px-10 py-3.5 rounded-xl text-base font-bold relative z-10">
             <span className="relative z-10 flex items-center gap-2">
@@ -833,7 +1015,7 @@ export default function Home() {
       <header className="sticky top-0 z-40 border-b border-white/5 bg-[#06060f]/80 backdrop-blur-xl">
         <div className="max-w-[1400px] mx-auto px-5 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 flex items-center justify-center text-emerald-400">{Ic.church("w-4.5 h-4.5")}</div>
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500/20 via-cyan-500/10 to-violet-500/10 flex items-center justify-center text-emerald-400 shadow-[0_0_12px_rgba(0,255,136,0.15)]">{Ic.church("w-4.5 h-4.5")}</div>
             <div>
               <h1 className="text-sm font-bold leading-tight">牛市预演教</h1>
               <p className="text-[10px] text-slate-600 leading-tight">Pre-Bull Simulation Church</p>
@@ -850,15 +1032,9 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Tab switch */}
-            <div className="hidden md:flex bg-white/[0.03] rounded-lg p-0.5 border border-white/5">
-              <button onClick={() => setActiveTab("arena")} className={`px-3 py-1.5 text-[11px] rounded-md transition-all ${activeTab === "arena" ? "bg-white/[0.06] text-white" : "text-slate-500 hover:text-slate-300"}`}>
-                {Ic.swords("w-3 h-3")} Arena
-              </button>
-              <button onClick={() => setActiveTab("analytics")} className={`px-3 py-1.5 text-[11px] rounded-md transition-all ${activeTab === "analytics" ? "bg-white/[0.06] text-white" : "text-slate-500 hover:text-slate-300"}`}>
-                {Ic.chart("w-3 h-3")} Analytics
-              </button>
-            </div>
+            <button onClick={handleGenerateScripture} disabled={loading} className="hidden md:flex px-3 py-2 rounded-lg text-[11px] text-amber-400 hover:bg-amber-500/10 border border-amber-500/15 transition-all items-center gap-1">
+              {Ic.book("w-3.5 h-3.5")} 生成经文
+            </button>
 
             <button onClick={handleRound} disabled={loading} className="btn-primary px-5 py-2 rounded-lg text-sm font-semibold">
               <span className="relative z-10 flex items-center gap-2">
@@ -901,15 +1077,15 @@ export default function Home() {
 
         {/* ===== Stats Row (enhanced) ===== */}
         {metrics && (
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-            <StatCard icon={Ic.network("w-5 h-5")} label="Agents" value={metrics.totalAgents} delay={0} />
-            <StatCard icon={Ic.check("w-5 h-5")} label="已转化" value={metrics.convertedCount} sub={`${convRate}%`} delay={50} />
-            <StatCard icon={Ic.coins("w-5 h-5")} label="总投资" value={metrics.totalInvested} sub="PBT" delay={100} />
-            <StatCard icon={Ic.sparkles("w-5 h-5")} label="精神市值" value={Math.round(metrics.spiritMarketCap)} delay={150} />
-            <StatCard icon={Ic.megaphone("w-5 h-5")} label="传教次数" value={metrics.totalMissionary} delay={200} />
-            <StatCard icon={Ic.ghost("w-5 h-5")} label="叛教次数" value={metrics.totalApostasy} delay={250} />
-            <StatCard icon={Ic.link("w-5 h-5")} label="联盟" value={metrics.allianceCount} delay={300} />
-            <StatCard icon={Ic.refresh("w-5 h-5")} label="回合数" value={metrics.rounds} delay={350} />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard icon={Ic.network("w-5 h-5")} label="Agents" value={metrics.totalAgents} delay={0} accent="cyan" />
+            <StatCard icon={Ic.check("w-5 h-5")} label="已转化" value={metrics.convertedCount} sub={`${convRate}%`} delay={50} accent="emerald" />
+            <StatCard icon={Ic.coins("w-5 h-5")} label="总投资" value={metrics.totalInvested} sub="PBT" delay={100} accent="amber" />
+            <StatCard icon={Ic.sparkles("w-5 h-5")} label="精神市值" value={Math.round(metrics.spiritMarketCap)} delay={150} accent="violet" />
+            <StatCard icon={Ic.megaphone("w-5 h-5")} label="传教次数" value={metrics.totalMissionary} delay={200} accent="blue" />
+            <StatCard icon={Ic.ghost("w-5 h-5")} label="叛教次数" value={metrics.totalApostasy} delay={250} accent="rose" />
+            <StatCard icon={Ic.link("w-5 h-5")} label="联盟" value={metrics.allianceCount} delay={300} accent="indigo" />
+            <StatCard icon={Ic.refresh("w-5 h-5")} label="回合数" value={metrics.rounds} delay={350} accent="slate" />
           </div>
         )}
 
@@ -960,7 +1136,7 @@ export default function Home() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {agents.map((agent) => (
-                <AgentCard key={agent.id} agent={agent} isActive={latestTarget === agent.id} />
+                <AgentCard key={agent.id} agent={agent} isActive={latestTarget === agent.id} onApostasy={handleApostasy} />
               ))}
             </div>
 
@@ -975,68 +1151,48 @@ export default function Home() {
               </div>
             )}
 
-            {/* Analytics Tab Content */}
-            {activeTab === "analytics" && (
-              <>
-                {/* #4 Narrative Bias */}
-                {agents.length > 0 && <NarrativeBiasDisplay agents={agents} />}
+            {/* #4 Narrative Bias — always visible */}
+            {agents.length > 0 && <NarrativeBiasDisplay agents={agents} />}
 
-                {/* #9 Leaderboard */}
-                {agents.length > 0 && <Leaderboard agents={agents} />}
+            {/* #9 Leaderboard — always visible */}
+            {agents.length > 0 && <Leaderboard agents={agents} />}
 
-                {/* #16 Alliances */}
-                <AllianceDisplay alliances={alliances} agents={agents} />
-              </>
-            )}
+            {/* #16 Alliances — always visible */}
+            <AllianceDisplay alliances={alliances} agents={agents} />
           </div>
 
-          {/* Right: Debate Arena + Sidebar */}
+          {/* Right: Debate Arena + News + Scriptures */}
           <div className="lg:col-span-5 space-y-3">
-            {/* Mobile tab switch */}
-            <div className="flex md:hidden bg-white/[0.03] rounded-lg p-0.5 border border-white/5 mb-2">
-              <button onClick={() => setActiveTab("arena")} className={`flex-1 px-3 py-1.5 text-[11px] rounded-md transition-all ${activeTab === "arena" ? "bg-white/[0.06] text-white" : "text-slate-500"}`}>Arena</button>
-              <button onClick={() => setActiveTab("analytics")} className={`flex-1 px-3 py-1.5 text-[11px] rounded-md transition-all ${activeTab === "analytics" ? "bg-white/[0.06] text-white" : "text-slate-500"}`}>Analytics</button>
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                {Ic.swords("w-4 h-4 text-slate-400")} Debate Arena
+              </h2>
+              {debates.length > 0 && <span className="text-[11px] text-slate-600">{debates.length} debates</span>}
             </div>
 
-            {activeTab === "arena" ? (
-              <>
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
-                    {Ic.swords("w-4 h-4 text-slate-400")} Debate Arena
-                  </h2>
-                  {debates.length > 0 && <span className="text-[11px] text-slate-600">{debates.length} debates</span>}
+            <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1 scrollbar-thin">
+              {debates.length === 0 ? (
+                <div className="glass rounded-2xl p-12 text-center">
+                  <div className="w-14 h-14 mx-auto mb-4 rounded-xl bg-white/[0.03] flex items-center justify-center animate-float text-emerald-400">
+                    {Ic.zap("w-7 h-7")}
+                  </div>
+                  <p className="text-sm text-slate-400">点击 <span className="text-emerald-400 font-medium">下一轮</span> 开始辩论</p>
+                  <p className="text-[11px] text-slate-600 mt-1">5步辩论协议 · 多策略组合 · 历史案例论证</p>
                 </div>
+              ) : (
+                debates.map((debate) => (
+                  <DebateCard key={`${debate.round}-${debate.prophetId}`} debate={debate} agents={agents}
+                    expanded={expandedDebate === debate.round}
+                    onToggle={() => setExpandedDebate(expandedDebate === debate.round ? null : debate.round)} />
+                ))
+              )}
+            </div>
 
-                <div className="space-y-3 max-h-[calc(100vh-200px)] overflow-y-auto pr-1">
-                  {debates.length === 0 ? (
-                    <div className="glass rounded-2xl p-12 text-center">
-                      <div className="w-14 h-14 mx-auto mb-4 rounded-xl bg-white/[0.03] flex items-center justify-center animate-float text-emerald-400">
-                        {Ic.zap("w-7 h-7")}
-                      </div>
-                      <p className="text-sm text-slate-400">点击 <span className="text-emerald-400 font-medium">下一轮</span> 开始辩论</p>
-                      <p className="text-[11px] text-slate-600 mt-1">5步辩论协议 · 多策略组合 · 历史案例论证</p>
-                    </div>
-                  ) : (
-                    debates.map((debate) => (
-                      <DebateCard key={`${debate.round}-${debate.prophetId}`} debate={debate} agents={agents}
-                        expanded={expandedDebate === debate.round}
-                        onToggle={() => setExpandedDebate(expandedDebate === debate.round ? null : debate.round)} />
-                    ))
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                {/* #10 News */}
-                <NewsTicker news={news} />
-                {/* #18 Scriptures */}
-                <ScriptureDisplay scriptures={scriptures} />
-                {/* #9 Leaderboard mobile */}
-                {agents.length > 0 && <Leaderboard agents={agents} />}
-                {/* #16 Alliances mobile */}
-                <AllianceDisplay alliances={alliances} agents={agents} />
-              </>
-            )}
+            {/* #10 News — always visible below debates */}
+            <NewsTicker news={news} />
+
+            {/* #18 Scriptures — always visible with generate button */}
+            <ScriptureDisplay scriptures={scriptures} onGenerate={handleGenerateScripture} />
           </div>
         </div>
       </main>

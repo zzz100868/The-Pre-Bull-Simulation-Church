@@ -236,7 +236,7 @@ export function getConvertibleAgents(): Agent[] {
 // #17 传教士 — 已转化 Agent 可充当说服者
 export function getMissionaryAgents(): Agent[] {
   return agents.filter(
-    (a) => (a.stage === "S3" || a.stage === "S4") && a.id !== "prophet"
+    (a) => a.stage >= "S1" && a.id !== "prophet"
   );
 }
 

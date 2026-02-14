@@ -32,8 +32,8 @@
 - ❌ WebSocket（改前端 3s 轮询）
 - ❌ PostgreSQL / SQLite（全内存 JSON）
 - ❌ Redis
-- ❌ 经文/预言生成模块
-- ❌ 市场模拟器
+- ✅ 经文/预言生成模块（已实现，LLM 实时生成）
+- ✅ 市场模拟器（已通过精神市值系统实现）
 
 ---
 
@@ -341,7 +341,7 @@ interface DebateRecord {
 |------|------|------|
 | Smart Contract | Solidity + Hardhat | 标准 ERC-20 |
 | Backend | Node.js + Express + TypeScript | 单文件可跑 |
-| LLM | OpenAI GPT-4o-mini | 便宜、快、够用 |
+| LLM | Moonshot AI (moonshot-v1-8k) | OpenAI 兼容接口，快速、稳定 |
 | Storage | 内存 JSON | 不需要数据库 |
 | Frontend | Next.js + TailwindCSS | 快速出页面 |
 | Web3 | ethers.js v6 | 合约交互 |
@@ -436,47 +436,37 @@ monadaiagent/
 
 ## 十二、text.md 未在 MVP 中实现的内容
 
-| # | text.md 内容 | MVP 状态 | 影响 |
+| # | text.md 内容 | 状态 | 实现方式 |
 |---|---|---|---|
-| 1 | 精神市值系统 | ❌ 完全没有 | 丢失"现实 vs 精神"核心冲突 |
-| 2 | 时间线自由切换 | ❌ 无回退机制 | 缺少"叛教"行为 |
-| 3 | 实验结论/失败机制 | ❌ 无输出 | 无法证伪 |
-| 4 | 教义4—叙事偏差记录 | ❌ 无数据 | 教义无法展示 |
-| 5 | Token 获取方式多元 | ⚠️ 部分实现 | 只有转化 mint，无任务获取 |
-| 6 | Token 权限/权重 | ❌ 无影响 | Token 无 utility |
-| 7 | 多策略组合 | ⚠️ 简化 | 只选 1 种策略 |
-| 8 | 历史案例论证 | ❌ 无 | 论证深度不够 |
-| 9 | 行为榜单 | ❌ 无 | 社会证明弱 |
-| 10 | 未来新闻生成 | ❌ 无 | Bonus 缺失 |
-| 11 | 反对观点回应模板 | ⚠️ 隐式 | LLM 自由发挥，不可控 |
-| 12 | 策略成功率统计 | ⚠️ 数据有，不展示 | 🔥 最易补回 |
-| 13 | 阵营流动/叛教 | ❌ 无 | 实验双向性缺失 |
-| 14 | 辩论5步协议 | ⚠️ 简化 | 少2步识别 |
-| 15 | 多教派辩论记录 | ❌ 只有1种 | 对比维度单一 |
-| 16 | 联盟与分裂 | ❌ 无 | Bonus 分缺失 |
-| 17 | 传教士行为 | ❌ 无 | 传播性弱 |
-| 18 | 经文/预言生成 | ❌ 无 | Bonus 分缺失 |
-| 19 | 风险声明 UI | ❌ 无 | 🔥 最易补回 |
+| 1 | 精神市值系统 | ✅ 已实现 | `updateSpiritValues()` + `SpiritMarketCap` 前端组件，精神市值 vs 实际PBT对比 |
+| 2 | 时间线自由切换 | ✅ 已实现 | `demoteStage()` + `shouldApostatize()` + 前端叛教按钮，支持信仰回退 |
+| 3 | 实验结论/失败机制 | ✅ 已实现 | `getExperimentConclusion()` 4种结局：ongoing/bull_wins/failed/stalemate + `ConclusionBanner` |
+| 4 | 教义4—叙事偏差记录 | ✅ 已实现 | `recordNarrativeBias()` 每轮记录 + `NarrativeBiasDisplay` 前端可视化 |
+| 5 | Token 获取方式多元 | ✅ 已实现 | `grantTaskReward()` 6种任务：辩论参与/见证转化/传教成功/联盟/经文/坚守 |
+| 6 | Token 权限/权重 | ✅ 已实现 | `voteWeight` 基于PBT持有量，影响 `shouldConvert()` 概率 |
+| 7 | 多策略组合 | ✅ 已实现 | `pickSecondaryStrategy()` 主+副双策略，副策略提供额外加成 |
+| 8 | 历史案例论证 | ✅ 已实现 | `HISTORICAL_CASES` 6个历史案例注入LLM prompt，前端显示引用标签 |
+| 9 | 行为榜单 | ✅ 已实现 | `getLeaderboard()` 6维度排名 + `Leaderboard` 前端组件 |
+| 10 | 未来新闻生成 | ✅ 已实现 | `generateFutureNews()` 每轮LLM生成 + `NewsTicker` 前端组件 |
+| 11 | 反对观点回应模板 | ✅ 已实现 | `COUNTER_ARGUMENT_TEMPLATES` 6个模板注入prompt，前端展示使用的反驳 |
+| 12 | 策略成功率统计 | ✅ 已实现 | `strategyStats` 从debates统计 + `StrategyStats` 4个策略进度条 |
+| 13 | 阵营流动/叛教 | ✅ 已实现 | `shouldApostatize()` 自动叛教检测 + POST `/api/apostasy` 手动触发 |
+| 14 | 辩论5步协议 | ✅ 已实现 | `DEBATE_PHASES` 5阶段 + LLM生成10段对话（5轮交锋） |
+| 15 | 多教派辩论记录 | ✅ 已实现 | `generateFactionDebate()` 每5轮触发非先知Agent间辩论 |
+| 16 | 联盟与分裂 | ✅ 已实现 | `shouldFormAlliance()` + `shouldSplit()` + `AllianceDisplay` 前端组件 |
+| 17 | 传教士行为 | ✅ 已实现 | `getMissionaryAgents()` S1+可传教，60%概率替代先知说服 |
+| 18 | 经文/预言生成 | ✅ 已实现 | `generateScripture()` 每轮生成 + 手动生成按钮 + `ScriptureDisplay` |
+| 19 | 风险声明 UI | ✅ 已实现 | Landing页 + Footer 双重风险免责声明 |
 
 ---
 
-## 十三、优先补回清单（性价比排序）
+## 十三、补回清单完成状态
 
-**🎯 优先级 1：策略成功率统计展示**
-- **需求：** 在 Dashboard 加 4 个进度条，显示各策略成功率
-- **数据源：** 已在内存 debates[] 中，只需前端统计展示
-- **时间：** 10 分钟
-- **价值：** 直接满足比赛"策略多样性"评判
+> ✅ **所有 19 项功能已全部实现并在前端可见。** 以下为原计划的补回清单完成记录。
 
-**🎯 优先级 2：风险声明 Footer**
-- **需求：** 在前端页脚加一行免责声明
-- **内容：** "⚠️ Simulation / Fiction / Not Financial Advice"
-- **时间：** 5 分钟
-- **价值：** 展示团队伦理意识，符合原 text.md 承诺
+**✅ 策略成功率统计展示** — `StrategyStats` 组件，4个策略进度条实时展示
 
-**🎯 优先级 3：反对观点回应模板注入 prompt**
-- **需求：** 在 LLM prompt 中注入预设回应框架
-- **示例：** 如何应对"空气币""价格没涨就没用"等反对意见
-- **时间：** 20 分钟
-- **价值：** 显著提升辩论质量一致性和说服力
+**✅ 风险声明 Footer** — Landing 页 + Dashboard Footer 双重风险免责声明
+
+**✅ 反对观点回应模板** — `COUNTER_ARGUMENT_TEMPLATES` 6个模板注入 LLM prompt，前端展示使用的反驳模板
 
