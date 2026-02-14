@@ -322,3 +322,42 @@ body::after {
   box-shadow: 0 0 6px rgba(255,255,255,0.5);
   transition: left 0.5s ease-out;
 }
+
+/* ===== New Feature Styles ===== */
+
+/* Risk Disclaimer */
+.risk-disclaimer {
+  backdrop-filter: blur(8px);
+}
+
+/* Scrollbar */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  height: 4px;
+  width: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.08);
+  border-radius: 100px;
+}
+
+/* Ghost/apostasy indicator pulse */
+@keyframes apostasy-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+.apostasy-pulse {
+  animation: apostasy-pulse 2s ease-in-out infinite;
+}
+
+/* Tab transition */
+.tab-active {
+  background: rgba(255,255,255,0.06);
+  color: white;
+}
