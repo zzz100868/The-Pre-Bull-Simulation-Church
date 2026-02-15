@@ -14,9 +14,8 @@ import {
   Agent, DebateRecord,
 } from "./agents";
 import {
-  pickStrategy, pickSecondaryStrategy, shouldConvert,
+  pickStrategy, pickSecondaryStrategy, getConversionBaseScore,
   shouldApostatize, shouldFormAlliance, shouldSplit,
-  HISTORICAL_CASES, COUNTER_ARGUMENT_TEMPLATES,
 } from "./persuasion";
 import { generateDebate, generateFutureNews, generateScripture, generateFactionDebate } from "./llm";
 import { initChain, mintPBT, recordConversion, getAgentAddress } from "./chain";
@@ -27,6 +26,12 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
 const chainReady = initChain();
+
+function clamp01(v: number): number {
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
+}
 
 // ==================== API ====================
 
@@ -81,8 +86,17 @@ app.post("/api/round", async (_req, res) => {
       persuader, target, strategy, convertedRatio, secondaryStrategy
     );
 
-    // ====== 4. 判定转化 (#6 Token权重加成) ======
-    const converted = shouldConvert(target, strategy, convertedRatio, secondaryStrategy, persuader);
+    // ====== 4. 判定转化（基础概率 + 辩论质量融合） ======
+    const baseScore = getConversionBaseScore(
+      target,
+      strategy,
+      convertedRatio,
+      secondaryStrategy,
+      persuader
+    );
+    const debateScore = debateResult.debateScore ?? 0.5;
+    const finalScore = clamp01(baseScore * 0.65 + debateScore * 0.35);
+    const converted = Math.random() < finalScore;
 
     // ====== 5. 记录推广 + 任务奖励 (#5) ======
     const stanceBefore = target.beliefStance;
@@ -187,6 +201,11 @@ app.post("/api/round", async (_req, res) => {
       counterArguments: debateResult.counterArgsUsed,
       factionDebate: false,
       isMissionary,
+      baseScore,
+      debateScore,
+      finalScore,
+      outputQuality: debateResult.outputQuality,
+      decisionReason: debateResult.decisionReason,
     };
     addDebate(debate);
 
@@ -241,6 +260,13 @@ app.post("/api/round", async (_req, res) => {
       conclusion: getExperimentConclusion(),
       newAlliance,
       splitEvent,
+      decisionBreakdown: {
+        baseScore,
+        debateScore,
+        finalScore,
+        outputQuality: debateResult.outputQuality,
+        decisionReason: debateResult.decisionReason,
+      },
     });
   } catch (error) {
     console.error("Round error:", error);

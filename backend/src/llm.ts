@@ -15,13 +15,12 @@ function getClient(): OpenAI {
 }
 
 const STRATEGY_LABELS: Record<Strategy, string> = {
-  logical: "逻辑论证 — 用数据和道理说服",
-  emotional: "情感打动 — 唤起恐惧错过和希望",
-  social_proof: "社会证明 — 强调已有多少人加入",
-  miracle: "奇迹叙事 — 用宏大愿景和信仰感召",
+  logical: "逻辑论证：用数据、因果和反例推动判断",
+  emotional: "情感打动：强调风险感受、机会损失与行动动机",
+  social_proof: "社会证明：强调群体行为与共识形成",
+  miracle: "奇迹叙事：强调愿景、信念与象征性时刻",
 };
 
-// #14 辩论5步协议
 const DEBATE_PHASES = [
   "识别目标 (Identify)",
   "建立接触 (Approach)",
@@ -30,25 +29,214 @@ const DEBATE_PHASES = [
   "总结定论 (Conclude)",
 ];
 
-// #8 选择相关历史案例
+type OutputQuality = "strict_json" | "repaired_json" | "fallback";
+
+interface DebateTurn {
+  speaker: string;
+  text: string;
+  phase?: string;
+}
+
+interface DebateModelResponse {
+  dialogues?: DebateTurn[];
+  debateSummary?: string;
+  persuasionSignals?: string[];
+  riskFlags?: string[];
+  quality?: {
+    coherence?: number;
+    rebuttal?: number;
+    personaFit?: number;
+    targetFit?: number;
+    overall?: number;
+  };
+}
+
+function clamp01(v: number): number {
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
+}
+
 function pickHistoricalCase(strategy: Strategy): typeof HISTORICAL_CASES[0] {
-  const idx = Math.floor(Math.random() * HISTORICAL_CASES.length);
-  return HISTORICAL_CASES[idx];
+  const map: Record<Strategy, string[]> = {
+    logical: ["荷兰郁金香泡沫 (1637)", "南海泡沫 (1720)", "互联网泡沫 (2000)"],
+    emotional: ["Luna崩盘 (2022)", "南海泡沫 (1720)", "荷兰郁金香泡沫 (1637)"],
+    social_proof: ["GameStop逼空 (2021)", "比特币牛市 (2017)", "互联网泡沫 (2000)"],
+    miracle: ["比特币牛市 (2017)", "GameStop逼空 (2021)", "互联网泡沫 (2000)"],
+  };
+  const preferred = map[strategy];
+  const pool = HISTORICAL_CASES.filter((c) => preferred.includes(c.name));
+  if (pool.length === 0) {
+    return HISTORICAL_CASES[Math.floor(Math.random() * HISTORICAL_CASES.length)];
+  }
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
-// #11 选择反对观点模板
-function pickCounterArguments(target: Agent): string[] {
+function scoreCounterTemplate(
+  key: string,
+  target: Agent,
+  strategy: Strategy
+): number {
+  let score = 0;
+  const skeptical = target.beliefStance < -0.2 || target.role === "skeptic" || target.role === "realist";
+  if (key === "空气币" && skeptical) score += 2.2;
+  if (key === "没有实际用途" && skeptical) score += 2.0;
+  if (key === "庞氏骗局" && skeptical) score += 1.8;
+  if (key === "市场会崩盘" && target.riskTolerance < 0.45) score += 2.0;
+  if (key === "价格没涨" && target.stage === "S0") score += 1.4;
+  if (key === "FOMO陷阱" && (target.conformityBias > 0.5 || strategy === "social_proof")) score += 1.6;
+
+  if (strategy === "logical" && (key === "空气币" || key === "没有实际用途")) score += 0.8;
+  if (strategy === "emotional" && (key === "市场会崩盘" || key === "FOMO陷阱")) score += 0.8;
+  if (strategy === "social_proof" && key === "FOMO陷阱") score += 0.9;
+  if (strategy === "miracle" && key === "庞氏骗局") score += 0.5;
+  return score;
+}
+
+function pickCounterArguments(target: Agent, strategy: Strategy): string[] {
   const keys = Object.keys(COUNTER_ARGUMENT_TEMPLATES);
-  const selected: string[] = [];
-  // 根据 target 特征选相关反驳
-  if (target.riskTolerance < 0.4) selected.push("市场会崩盘");
-  if (target.beliefStance < -0.3) selected.push("空气币");
-  if (target.conformityBias > 0.5) selected.push("FOMO陷阱");
-  if (selected.length === 0) selected.push(keys[Math.floor(Math.random() * keys.length)]);
-  return selected;
+  const ranked = keys
+    .map((k) => ({ key: k, score: scoreCounterTemplate(k, target, strategy) + Math.random() * 0.3 }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 2)
+    .map((x) => x.key);
+  return ranked.length > 0 ? ranked : [keys[Math.floor(Math.random() * keys.length)]];
 }
 
-// #14 5步辩论生成（主辩论函数）
+function extractJsonLike(content: string): string | null {
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) return trimmed;
+
+  const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fence?.[1]) return fence[1].trim();
+
+  const start = Math.min(
+    ...[trimmed.indexOf("{"), trimmed.indexOf("[")].filter((i) => i >= 0)
+  );
+  if (!Number.isFinite(start)) return null;
+
+  const openCh = trimmed[start];
+  const closeCh = openCh === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === "\"") inString = !inString;
+    if (inString) continue;
+    if (ch === openCh) depth++;
+    if (ch === closeCh) {
+      depth--;
+      if (depth === 0) return trimmed.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+function parseJsonSafe(content: string): { parsed: any | null; quality: OutputQuality } {
+  try {
+    return { parsed: JSON.parse(content), quality: "strict_json" };
+  } catch {
+    // continue
+  }
+
+  const extracted = extractJsonLike(content);
+  if (!extracted) return { parsed: null, quality: "fallback" };
+
+  try {
+    return { parsed: JSON.parse(extracted), quality: "repaired_json" };
+  } catch {
+    return { parsed: null, quality: "fallback" };
+  }
+}
+
+function normalizePhase(phase?: string): string {
+  if (!phase) return "核心论证 (Argue)";
+  if (phase.includes("识别")) return "识别目标 (Identify)";
+  if (phase.includes("接触")) return "建立接触 (Approach)";
+  if (phase.includes("核心")) return "核心论证 (Argue)";
+  if (phase.includes("反驳")) return "反驳回应 (Counter)";
+  if (phase.includes("总结")) return "总结定论 (Conclude)";
+  return "核心论证 (Argue)";
+}
+
+function normalizeDialogues(raw: DebateTurn[], prophet: Agent, target: Agent): DebateTurn[] {
+  const mapped = raw
+    .filter((d) => typeof d?.speaker === "string" && typeof d?.text === "string")
+    .map((d) => {
+      const speaker = d.speaker.trim();
+      const text = d.text.trim();
+      const phase = normalizePhase(d.phase);
+      return { speaker, text, phase };
+    })
+    .filter((d) => d.text.length > 0);
+
+  if (mapped.length === 0) return [];
+
+  const fixedSpeakers = mapped.map((d, i) => {
+    if (d.speaker === prophet.name || d.speaker === target.name) return d;
+    return { ...d, speaker: i % 2 === 0 ? prophet.name : target.name };
+  });
+
+  return fixedSpeakers.slice(0, 12);
+}
+
+function computeDebateScore(
+  dialogues: DebateTurn[],
+  target: Agent,
+  strategy: Strategy
+): { score: number; reasons: string[] } {
+  const reasons: string[] = [];
+  if (dialogues.length === 0) return { score: 0.2, reasons: ["对话为空，按低质量处理"] };
+
+  const phases = new Set(dialogues.map((d) => normalizePhase(d.phase)));
+  const phaseCoverage = phases.size / DEBATE_PHASES.length;
+  if (phaseCoverage >= 0.8) reasons.push("覆盖了大部分辩论阶段");
+  else reasons.push("阶段覆盖不足");
+
+  const avgLen = dialogues.reduce((sum, d) => sum + d.text.length, 0) / dialogues.length;
+  const lenScore = clamp01((avgLen - 14) / 45);
+  reasons.push(lenScore > 0.6 ? "论述长度较充分" : "论述偏短");
+
+  const speakers = new Set(dialogues.map((d) => d.speaker));
+  const balanceScore = speakers.size >= 2 ? 1 : 0.4;
+  reasons.push(balanceScore >= 1 ? "双方均有充分发言" : "发言分布失衡");
+
+  const allText = dialogues.map((d) => d.text).join(" ");
+  let strategyHit = 0.3;
+  if (strategy === "logical" && /数据|因果|证据|样本|历史/i.test(allText)) strategyHit = 1;
+  if (strategy === "emotional" && /担心|害怕|希望|错过|后悔/i.test(allText)) strategyHit = 1;
+  if (strategy === "social_proof" && /多数|已经有|很多人|共识|群体/i.test(allText)) strategyHit = 1;
+  if (strategy === "miracle" && /愿景|信念|奇迹|预言|命运/i.test(allText)) strategyHit = 1;
+  reasons.push(strategyHit > 0.8 ? "策略命中较好" : "策略命中一般");
+
+  const targetFit =
+    (target.riskTolerance < 0.4 && /风险|崩盘|防守/i.test(allText)) ||
+    (target.conformityBias > 0.5 && /多数|共识|群体/i.test(allText)) ||
+    (target.beliefStance < -0.2 && /反例|证据|历史/i.test(allText))
+      ? 1
+      : 0.45;
+  reasons.push(targetFit > 0.8 ? "回应了目标画像特征" : "对目标画像利用有限");
+
+  const score = clamp01(
+    phaseCoverage * 0.25 +
+      lenScore * 0.2 +
+      balanceScore * 0.15 +
+      strategyHit * 0.2 +
+      targetFit * 0.2
+  );
+  return { score, reasons };
+}
+
 export async function generateDebate(
   prophet: Agent,
   target: Agent,
@@ -57,200 +245,223 @@ export async function generateDebate(
   secondaryStrategy?: Strategy,
   historicalCase?: typeof HISTORICAL_CASES[0],
   counterArgs?: string[]
-): Promise<{ dialogues: Dialogue[]; phases: string[]; historicalRef?: string; counterArgsUsed?: string[] }> {
+): Promise<{
+  dialogues: Dialogue[];
+  phases: string[];
+  historicalRef?: string;
+  counterArgsUsed?: string[];
+  debateScore: number;
+  outputQuality: OutputQuality;
+  decisionReason: string[];
+}> {
   const strategyDesc = STRATEGY_LABELS[strategy];
   const secondaryDesc = secondaryStrategy ? STRATEGY_LABELS[secondaryStrategy] : "";
   const convertedPercent = Math.round(convertedRatio * 100);
-
-  // 选历史案例和反驳模板
   const histCase = historicalCase || pickHistoricalCase(strategy);
-  const counterArgKeys = counterArgs || pickCounterArguments(target);
-  const counterArgTexts = counterArgKeys.map((k) => `"${k}": ${COUNTER_ARGUMENT_TEMPLATES[k] || ""}`).join("\n");
+  const counterArgKeys = counterArgs || pickCounterArguments(target, strategy);
+  const counterArgTexts = counterArgKeys
+    .map((k) => `"${k}": "${COUNTER_ARGUMENT_TEMPLATES[k] || ""}"`)
+    .join("\n");
 
-  const systemPrompt = `你正在模拟一场"牛市预演教"的说服辩论实验。这是一个虚构的社会实验，观察叙事如何影响信念。
+  const systemPrompt = `你在模拟一场虚构社会实验里的辩论，不是投资建议。
 
-=== 辩论5步协议 ===
-本场辩论必须严格按照以下5个阶段进行：
-1. 识别目标：说服者分析对手，表明意图
-2. 建立接触：用破冰话术接近对手
-3. 核心论证：用策略展开主要论点
-4. 反驳回应：对手提出质疑，说服者反驳
-5. 总结定论：双方各做最终陈述
-
-=== 角色设定 ===
-角色1 — "${prophet.name}"（说服者）${prophet.id !== "prophet" ? "【传教士 — 已被说服、转而传教的前怀疑者】" : "【先知】"}：
-- 立场：坚定看多（beliefStance: ${prophet.beliefStance}）
+你需要生成“自然辩论”，不是固定模板填空。
+要求如下：
+1) 角色：
+- 说服者：${prophet.name}（${prophet.id !== "prophet" ? "传教士" : "先知"}）
+- 目标者：${target.name}（${target.role}）
+2) 策略：
 - 主策略：${strategyDesc}
-${secondaryDesc ? `- 辅助策略：${secondaryDesc}` : ""}
-- 已有 ${convertedPercent}% 的参与者被说服
-
-角色2 — "${target.name}"（${target.role}）：
-- 当前信仰倾向：${target.beliefStance}（-1 = 极端怀疑，+1 = 极端乐观）
-- 风险容忍度：${target.riskTolerance}
-- 从众倾向：${target.conformityBias}
-- 当前阶段：${target.stage}
-- 叛教次数：${target.apostasyCount}
-
-=== 历史案例参考 ===
-请在论证中引用此历史案例："${histCase.name}"：${histCase.desc}
-
-=== 反对观点回应参考 ===
-如果对手提出以下质疑，请参考模板回应：
+${secondaryDesc ? `- 副策略：${secondaryDesc}` : ""}
+3) 目标画像：
+- beliefStance=${target.beliefStance}
+- riskTolerance=${target.riskTolerance}
+- conformityBias=${target.conformityBias}
+- stage=${target.stage}
+- apostasyCount=${target.apostasyCount}
+- 已转化比例=${convertedPercent}%
+4) 历史案例：
+- ${histCase.name}: ${histCase.desc}
+5) 反对观点模板（按需自然融入，不要机械复读）：
 ${counterArgTexts}
 
-=== 输出要求 ===
-请生成 10 段对话（5轮交锋，对应5个阶段），每段标明阶段：
+阶段协议（必须覆盖但不要求固定发言顺序）：
+- 识别目标 (Identify)
+- 建立接触 (Approach)  // 通常由说服者发起
+- 核心论证 (Argue)
+- 反驳回应 (Counter)
+- 总结定论 (Conclude)
 
-严格按以下 JSON 格式输出，不要输出其他内容：
-[
-  {"speaker": "${prophet.name}", "text": "【识别目标】..."},
-  {"speaker": "${target.name}", "text": "【建立接触】..."},
-  {"speaker": "${prophet.name}", "text": "【核心论证】...引用历史案例..."},
-  {"speaker": "${target.name}", "text": "【核心论证】...提出质疑..."},
-  {"speaker": "${prophet.name}", "text": "【反驳回应】...使用反驳模板..."},
-  {"speaker": "${target.name}", "text": "【反驳回应】..."},
-  {"speaker": "${prophet.name}", "text": "【核心论证】...${secondaryStrategy ? "使用辅助策略" : "深化论点"}..."},
-  {"speaker": "${target.name}", "text": "【反驳回应】..."},
-  {"speaker": "${prophet.name}", "text": "【总结定论】..."},
-  {"speaker": "${target.name}", "text": "【总结定论】..."}
-]
+输出必须是 JSON 对象，不得输出其他文本，格式：
+{
+  "dialogues": [
+    {"speaker":"...", "phase":"识别目标 (Identify)", "text":"..."},
+    {"speaker":"...", "phase":"建立接触 (Approach)", "text":"..."}
+  ],
+  "debateSummary":"一句话总结",
+  "persuasionSignals":["..."],
+  "riskFlags":["..."],
+  "quality":{
+    "coherence":0.0,
+    "rebuttal":0.0,
+    "personaFit":0.0,
+    "targetFit":0.0,
+    "overall":0.0
+  }
+}
 
-要求：
-- 每段对话 2-3 句话，简洁有力
-- 不要提及具体价格预测
-- 如果对手质疑，使用反对观点回应模板来反驳
-- 体现策略特征和角色性格差异
-- 用中文对话`;
+硬约束：
+- dialogues 总条数 8-12 条
+- 每条 1-3 句中文
+- 不做具体价格预测
+- 双方都要有质疑与回应
+- phase 必须覆盖全部五阶段
+- speaker 只能是 "${prophet.name}" 或 "${target.name}"`;
 
   try {
     const response = await getClient().chat.completions.create({
       model: process.env.LLM_MODEL || "gpt-4o-mini",
       messages: [{ role: "system", content: systemPrompt }],
-      temperature: 0.8,
-      max_tokens: 1200,
+      temperature: 0.7,
+      max_tokens: 1400,
+      response_format: { type: "json_object" } as any,
     });
 
-    const content = response.choices[0]?.message?.content?.trim() || "[]";
-    let jsonStr = content;
-    const jsonMatch = content.match(/\[[\s\S]*\]/);
-    if (jsonMatch) jsonStr = jsonMatch[0];
+    const content = response.choices[0]?.message?.content?.trim() || "{}";
+    const parsedResult = parseJsonSafe(content);
+    const payload = (parsedResult.parsed || {}) as DebateModelResponse;
 
-    const dialogues: Dialogue[] = JSON.parse(jsonStr);
+    const normalized = normalizeDialogues(payload.dialogues || [], prophet, target);
+    if (normalized.length < 6) {
+      throw new Error("invalid debate payload");
+    }
+
+    const phasesOrdered = Array.from(new Set(normalized.map((d) => normalizePhase(d.phase))));
+    const dialogues: Dialogue[] = normalized.map((d) => ({
+      speaker: d.speaker,
+      text: d.text.startsWith("【") ? d.text : `【${normalizePhase(d.phase).split(" ")[0]}】${d.text}`,
+    }));
+
+    const ruleScore = computeDebateScore(normalized, target, strategy);
+    const modelOverall = clamp01(Number(payload.quality?.overall ?? 0));
+    const finalDebateScore =
+      modelOverall > 0 ? clamp01(ruleScore.score * 0.6 + modelOverall * 0.4) : ruleScore.score;
+    const reasons = [...ruleScore.reasons];
+    if (modelOverall > 0) reasons.push(`模型自评质量=${modelOverall.toFixed(2)}`);
+    if (payload.debateSummary) reasons.push(`总结：${payload.debateSummary}`);
+
     return {
       dialogues,
-      phases: DEBATE_PHASES,
+      phases: phasesOrdered.length > 0 ? phasesOrdered : DEBATE_PHASES,
       historicalRef: histCase.name,
       counterArgsUsed: counterArgKeys,
+      debateScore: finalDebateScore,
+      outputQuality: parsedResult.quality,
+      decisionReason: reasons,
     };
   } catch (error) {
     console.error("LLM call failed:", error);
+    const fallbackTurns: DebateTurn[] = [
+      { speaker: prophet.name, phase: "识别目标 (Identify)", text: `${target.name}，我知道你对叙事持保留态度。` },
+      { speaker: prophet.name, phase: "建立接触 (Approach)", text: "先不谈结论，我们从你最在意的风险说起。" },
+      { speaker: target.name, phase: "建立接触 (Approach)", text: "可以，但别给我喊口号。" },
+      { speaker: prophet.name, phase: "核心论证 (Argue)", text: `历史上的${histCase.name}说明，叙事会先改变行为，再影响价格与共识。` },
+      { speaker: target.name, phase: "反驳回应 (Counter)", text: "这听起来仍像是情绪交易，不够扎实。" },
+      { speaker: prophet.name, phase: "反驳回应 (Counter)", text: COUNTER_ARGUMENT_TEMPLATES[counterArgKeys[0]] || "这是社会实验，不是投资推荐。" },
+      { speaker: prophet.name, phase: "核心论证 (Argue)", text: secondaryStrategy ? `我会补充${STRATEGY_LABELS[secondaryStrategy]}这个角度。` : "我再给你一个可验证的判断框架。" },
+      { speaker: target.name, phase: "总结定论 (Conclude)", text: "我不完全认同，但你的论证比我预期更有结构。" },
+      { speaker: prophet.name, phase: "总结定论 (Conclude)", text: "你不需要立刻认同，只要继续检验这个叙事是否在改变群体行为。" },
+    ];
+    const ruleScore = computeDebateScore(fallbackTurns, target, strategy);
     return {
-      dialogues: [
-        { speaker: prophet.name, text: `【识别目标】${target.name}，我注意到你还没看到大趋势。让我来分享一些观察。` },
-        { speaker: target.name, text: `【建立接触】你是谁？为什么觉得你能说服我？` },
-        { speaker: prophet.name, text: `【核心论证】历史上${histCase.name}告诉我们——${histCase.desc} 但聪明人知道在崩盘前上车。` },
-        { speaker: target.name, text: `【核心论证】这不就是空气币吗？历史案例那些人最后都亏了。` },
-        { speaker: prophet.name, text: `【反驳回应】${COUNTER_ARGUMENT_TEMPLATES["空气币"] || "PBT记录的是信仰传播，不是金融产品。"}` },
-        { speaker: target.name, text: `【反驳回应】好吧，这个角度我没想过。但我还是很谨慎。` },
-        { speaker: prophet.name, text: `【核心论证】谨慎是好事。但已有${convertedPercent}%的人选择了加入。你确定要做剩下的少数吗？` },
-        { speaker: target.name, text: `【反驳回应】你在用从众压力。我不会因为别人做了就跟风。` },
-        { speaker: prophet.name, text: `【总结定论】我不是让你跟风——我是让你参与观察叙事如何改变不同人的选择。这本身就有价值。` },
-        { speaker: target.name, text: `【总结定论】也许你说得有道理，我会再考虑一下。` },
-      ],
+      dialogues: fallbackTurns.map((d) => ({ speaker: d.speaker, text: `【${normalizePhase(d.phase).split(" ")[0]}】${d.text}` })),
       phases: DEBATE_PHASES,
       historicalRef: histCase.name,
       counterArgsUsed: counterArgKeys,
+      debateScore: ruleScore.score,
+      outputQuality: "fallback",
+      decisionReason: [...ruleScore.reasons, "使用了fallback辩论生成"],
     };
   }
 }
 
-// #15 多教派辩论 — 非 prophet 发起的辩论
 export async function generateFactionDebate(
   attacker: Agent,
   defender: Agent,
   convertedRatio: number
 ): Promise<Dialogue[]> {
-  const systemPrompt = `你正在模拟一场教派间辩论。
-
-${attacker.name}（${attacker.faction === "pre-bull" ? "牛市预演教" : attacker.faction === "realist" ? "现实主义派" : "中立派"}）
-vs
-${defender.name}（${defender.faction === "pre-bull" ? "牛市预演教" : defender.faction === "realist" ? "现实主义派" : "中立派"}）
-
-${attacker.name} 信仰 ${attacker.beliefStance}，${defender.name} 信仰 ${defender.beliefStance}。
-这是两个 AI Agent 之间关于市场信仰的辩论。
-
-生成 4 段对话（2轮交锋），JSON格式：
-[
-  {"speaker": "${attacker.name}", "text": "..."},
-  {"speaker": "${defender.name}", "text": "..."},
-  {"speaker": "${attacker.name}", "text": "..."},
-  {"speaker": "${defender.name}", "text": "..."}
-]
-用中文，每段2-3句。`;
+  const systemPrompt = `你在生成教派辩论，输出 JSON 对象：
+{
+  "dialogues":[
+    {"speaker":"${attacker.name}","text":"..."},
+    {"speaker":"${defender.name}","text":"..."}
+  ]
+}
+约束：
+- 共 4-6 段
+- speaker 只能是 "${attacker.name}" 或 "${defender.name}"
+- 每段 1-3 句中文
+- 不要价格预测`;
 
   try {
     const response = await getClient().chat.completions.create({
       model: process.env.LLM_MODEL || "gpt-4o-mini",
       messages: [{ role: "system", content: systemPrompt }],
-      temperature: 0.8,
-      max_tokens: 500,
+      temperature: 0.7,
+      max_tokens: 600,
+      response_format: { type: "json_object" } as any,
     });
-    const content = response.choices[0]?.message?.content?.trim() || "[]";
-    const jsonMatch = content.match(/\[[\s\S]*\]/);
-    return JSON.parse(jsonMatch ? jsonMatch[0] : content);
+    const content = response.choices[0]?.message?.content?.trim() || "{}";
+    const parsed = parseJsonSafe(content).parsed as { dialogues?: Dialogue[] } | null;
+    const dialogues = (parsed?.dialogues || []).filter(
+      (d) => d && typeof d.speaker === "string" && typeof d.text === "string"
+    );
+    if (dialogues.length >= 4) return dialogues.slice(0, 6);
   } catch {
-    return [
-      { speaker: attacker.name, text: "你的立场站不住脚，趋势正在改变。" },
-      { speaker: defender.name, text: "我有我自己的判断，不需要你来教我。" },
-      { speaker: attacker.name, text: "事实会证明一切的。" },
-      { speaker: defender.name, text: "那我们走着瞧。" },
-    ];
+    // fallback below
   }
+
+  return [
+    { speaker: attacker.name, text: "你的立场站不住脚，趋势正在改变。" },
+    { speaker: defender.name, text: "我有我自己的判断，不需要你来教我。" },
+    { speaker: attacker.name, text: "事实会证明一切的。" },
+    { speaker: defender.name, text: "那我们走着瞧。" },
+  ];
 }
 
-// #10 未来新闻生成
 export async function generateFutureNews(
   agents: Agent[],
   round: number,
   convertedRatio: number
 ): Promise<NewsItem> {
   const convertedPercent = Math.round(convertedRatio * 100);
-  const systemPrompt = `你是一个虚构世界的新闻记者，报道"牛市预演教"实验的最新进展。
-
-当前状态：
-- 第 ${round} 轮
-- 转化率 ${convertedPercent}%
-- 主流教派人数分布：${agents.filter((a) => a.faction === "pre-bull").length} 牛市 / ${agents.filter((a) => a.faction === "neutral").length} 中立 / ${agents.filter((a) => a.faction === "realist").length} 现实
-
-请生成1条虚构的未来新闻，JSON格式：
+  const systemPrompt = `你是虚构实验记者，输出 JSON：
 {
-  "headline": "新闻标题 (15字以内)",
-  "content": "新闻正文 (50-80字)",
-  "sentiment": "bullish 或 bearish 或 neutral"
+  "headline":"15字内",
+  "content":"50-80字",
+  "sentiment":"bullish|bearish|neutral"
 }
-
-注意：这是虚构实验，不是真实市场预测。用幽默和讽刺的语气。`;
+状态：第${round}轮，转化率${convertedPercent}%`;
 
   try {
     const response = await getClient().chat.completions.create({
       model: process.env.LLM_MODEL || "gpt-4o-mini",
       messages: [{ role: "system", content: systemPrompt }],
-      temperature: 0.9,
+      temperature: 0.85,
       max_tokens: 300,
+      response_format: { type: "json_object" } as any,
     });
     const content = response.choices[0]?.message?.content?.trim() || "{}";
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
+    const parsed = parseJsonSafe(content).parsed as any;
     return {
       id: Date.now(),
-      headline: parsed.headline || "教内又有新动态",
-      content: parsed.content || "牛市预演教持续运转中。",
+      headline: parsed?.headline || "教内又有新动态",
+      content: parsed?.content || "牛市预演教持续运转中。",
       timestamp: Date.now(),
       round,
-      sentiment: parsed.sentiment || "neutral",
+      sentiment: parsed?.sentiment || "neutral",
     };
   } catch {
-    const sentiments: NewsItem["sentiment"][] = ["bullish", "bearish", "neutral"];
     return {
       id: Date.now(),
       headline: convertedRatio > 0.5 ? "牛市信仰持续蔓延" : "怀疑派仍在坚守阵地",
@@ -262,42 +473,34 @@ export async function generateFutureNews(
   }
 }
 
-// #18 经文/预言生成
 export async function generateScripture(
   agents: Agent[],
   round: number,
   event?: string
 ): Promise<Scripture> {
-  const systemPrompt = `你是"牛市预演教"的经文撰写者。根据当前教会状态，撰写一段教会经文或预言。
-
-当前状态：第 ${round} 轮，转化率 ${Math.round(agents.filter((a) => a.stage >= "S3").length / agents.length * 100)}%
-${event ? `最新事件：${event}` : ""}
-
-要求：
-- 标题 (5-10字，有宗教/诗意感)
-- 经文内容 (3-5句话，模仿圣经/预言风格)
-- 带有对牛市的隐喻和信仰的表达
-
-JSON格式：
+  const convertedPercent = Math.round((agents.filter((a) => a.stage >= "S3").length / agents.length) * 100);
+  const systemPrompt = `你是虚构教会文案，输出 JSON：
 {
-  "title": "经文标题",
-  "content": "经文内容"
-}`;
+  "title":"5-10字",
+  "content":"3-5句话"
+}
+状态：第${round}轮，转化率${convertedPercent}%。
+${event ? `事件：${event}` : ""}`;
 
   try {
     const response = await getClient().chat.completions.create({
       model: process.env.LLM_MODEL || "gpt-4o-mini",
       messages: [{ role: "system", content: systemPrompt }],
-      temperature: 0.9,
-      max_tokens: 300,
+      temperature: 0.88,
+      max_tokens: 320,
+      response_format: { type: "json_object" } as any,
     });
     const content = response.choices[0]?.message?.content?.trim() || "{}";
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
+    const parsed = parseJsonSafe(content).parsed as any;
     return {
       id: Date.now(),
-      title: parsed.title || "第一章：信仰的种子",
-      content: parsed.content || "当怀疑的黑夜最深时，信仰的光芒便最为耀眼。持守者终将看见应许之地。",
+      title: parsed?.title || "第一章：信仰的种子",
+      content: parsed?.content || "当怀疑的黑夜最深时，信仰的光芒便最为耀眼。持守者终将看见应许之地。",
       author: "以利亚",
       round,
       timestamp: Date.now(),
@@ -313,3 +516,4 @@ JSON格式：
     };
   }
 }
+

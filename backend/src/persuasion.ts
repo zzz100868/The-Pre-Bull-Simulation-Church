@@ -24,13 +24,20 @@ function voteWeightModifier(persuader: Agent): number {
   return 1 + persuader.voteWeight * 0.02; // 每 1 权重 +2% 成功率
 }
 
-export function shouldConvert(
+function clamp01(v: number): number {
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
+}
+
+// 将原 shouldConvert 的概率计算逻辑抽出为可解释分数（0-1）
+export function getConversionBaseScore(
   target: Agent,
   strategy: Strategy,
   convertedRatio: number,
   secondaryStrategy?: Strategy,
   persuader?: Agent
-): boolean {
+): number {
   let p = 0.15; // base probability
   if (strategy === "social_proof" && target.conformityBias > 0.5) p += 0.25;
   if (strategy === "emotional" && target.riskTolerance < 0.4) p += 0.2;
@@ -38,7 +45,6 @@ export function shouldConvert(
   if (strategy === "miracle") p += 0.1;
   p += convertedRatio * target.conformityBias * 0.3; // 从众加成
 
-  // #7 辅策略加成
   if (secondaryStrategy) {
     if (secondaryStrategy === "social_proof" && target.conformityBias > 0.5) p += 0.08;
     if (secondaryStrategy === "emotional" && target.riskTolerance < 0.4) p += 0.06;
@@ -46,12 +52,29 @@ export function shouldConvert(
     if (secondaryStrategy === "miracle") p += 0.04;
   }
 
-  // #6 Token 权重
   if (persuader) {
     p *= voteWeightModifier(persuader);
   }
 
-  return Math.random() < p;
+  // 留出随机与融合空间，避免过度饱和
+  return clamp01(Math.min(p, 0.95));
+}
+
+export function shouldConvert(
+  target: Agent,
+  strategy: Strategy,
+  convertedRatio: number,
+  secondaryStrategy?: Strategy,
+  persuader?: Agent
+): boolean {
+  const baseScore = getConversionBaseScore(
+    target,
+    strategy,
+    convertedRatio,
+    secondaryStrategy,
+    persuader
+  );
+  return Math.random() < baseScore;
 }
 
 // #13 #2 叛教判定 — 已有信仰的 Agent 有一定概率叛教
