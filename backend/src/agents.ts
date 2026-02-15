@@ -58,6 +58,11 @@ export interface DebateRecord {
   counterArguments?: string[];
   factionDebate?: boolean;
   isMissionary?: boolean;
+  baseScore?: number;
+  debateScore?: number;
+  finalScore?: number;
+  outputQuality?: "strict_json" | "repaired_json" | "fallback";
+  decisionReason?: string[];
 }
 
 // #10 未来新闻
