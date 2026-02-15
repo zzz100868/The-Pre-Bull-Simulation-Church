@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
 
@@ -1006,6 +1006,9 @@ export default function Home() {
   // ==================== Dashboard ====================
 
   const convRate = metrics ? Math.round((metrics.convertedCount / metrics.totalAgents) * 100) : 0;
+  const currentDebate = debates[0] || null;
+  const currentProphet = currentDebate ? agents.find((a) => a.id === currentDebate.prophetId) : null;
+  const currentTarget = currentDebate ? agents.find((a) => a.id === currentDebate.targetId) : null;
 
   return (
     <div className="min-h-screen">
@@ -1075,125 +1078,97 @@ export default function Home() {
         {/* ===== #3 Experiment Conclusion Banner ===== */}
         {conclusion && conclusion.status !== "ongoing" && <ConclusionBanner conclusion={conclusion} />}
 
-        {/* ===== Stats Row (enhanced) ===== */}
-        {metrics && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard icon={Ic.network("w-5 h-5")} label="Agents" value={metrics.totalAgents} delay={0} accent="cyan" />
-            <StatCard icon={Ic.check("w-5 h-5")} label="已转化" value={metrics.convertedCount} sub={`${convRate}%`} delay={50} accent="emerald" />
-            <StatCard icon={Ic.coins("w-5 h-5")} label="总投资" value={metrics.totalInvested} sub="PBT" delay={100} accent="amber" />
-            <StatCard icon={Ic.sparkles("w-5 h-5")} label="精神市值" value={Math.round(metrics.spiritMarketCap)} delay={150} accent="violet" />
-            <StatCard icon={Ic.megaphone("w-5 h-5")} label="传教次数" value={metrics.totalMissionary} delay={200} accent="blue" />
-            <StatCard icon={Ic.ghost("w-5 h-5")} label="叛教次数" value={metrics.totalApostasy} delay={250} accent="rose" />
-            <StatCard icon={Ic.link("w-5 h-5")} label="联盟" value={metrics.allianceCount} delay={300} accent="indigo" />
-            <StatCard icon={Ic.refresh("w-5 h-5")} label="回合数" value={metrics.rounds} delay={350} accent="slate" />
-          </div>
-        )}
-
-        {/* ===== #1 Narrative Dominance Bar ===== */}
-        {metrics && (
-          <div className="glass rounded-xl p-4 animate-fade-in-up">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] text-slate-500 flex items-center gap-1">{Ic.trendUp("w-3.5 h-3.5")} 叙事主导力</span>
-              <span className="text-sm font-mono font-bold gradient-text">{Math.round(metrics.narrativeDominance * 100)}%</span>
-            </div>
-            <div className="h-2 bg-white/5 rounded-full overflow-hidden">
-              <div className="h-full rounded-full transition-all duration-700"
-                style={{ width: `${metrics.narrativeDominance * 100}%`, background: "linear-gradient(90deg, #f43f5e, #f59e0b, #00ff88)" }} />
-            </div>
-            <div className="flex justify-between text-[9px] text-slate-600 mt-1">
-              <span>怀疑主导</span>
-              <span>中立</span>
-              <span>牛市主导</span>
-            </div>
-          </div>
-        )}
-
-        {/* ===== #12 Strategy Stats ===== */}
-        {metrics && metrics.rounds > 0 && (
-          <section>
-            <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">策略效果分析</h2>
-            <StrategyStats stats={metrics.strategyStats} />
-          </section>
-        )}
-
-        {/* ===== Main Grid ===== */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left: Agents + Analytics */}
-          <div className="lg:col-span-7 space-y-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Agent 网络</h2>
-              {metrics && (
-                <div className="flex gap-3">
-                  {(["pre-bull", "neutral", "realist"] as const).map((f) => (
-                    <span key={f} className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                      <span className={`w-2 h-2 rounded-full ${FACTION_CONFIG[f].dot}`} />
-                      {FACTION_CONFIG[f].label} {metrics.factionDistribution[f]}
-                    </span>
-                  ))}
+          <aside className="lg:col-span-3 space-y-4">
+            <div className="glass rounded-2xl p-4">
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">当前对阵</h3>
+              {currentProphet && (
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-3 mb-3">
+                  <p className="text-[10px] text-emerald-300 uppercase tracking-wider mb-1">Prophet</p>
+                  <p className="text-sm font-semibold">{currentProphet.name}</p>
+                  <p className="text-[11px] text-slate-500">{currentProphet.role}</p>
+                  <p className="text-[11px] text-slate-400 mt-1">立场 {currentProphet.beliefStance.toFixed(2)}</p>
                 </div>
               )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {agents.map((agent) => (
-                <AgentCard key={agent.id} agent={agent} isActive={latestTarget === agent.id} onApostasy={handleApostasy} />
-              ))}
-            </div>
-
-            {/* #1 Spirit Market Cap + Donut */}
-            {metrics && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <SpiritMarketCap spirit={metrics.spiritMarketCap} real={metrics.realMarketCap} />
-                <div className="glass rounded-2xl p-5">
-                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">教派分布</h3>
-                  <FactionDonut distribution={metrics.factionDistribution} />
+              {currentTarget && (
+                <div className="rounded-xl border border-rose-500/20 bg-rose-500/[0.04] p-3">
+                  <p className="text-[10px] text-rose-300 uppercase tracking-wider mb-1">Target</p>
+                  <p className="text-sm font-semibold">{currentTarget.name}</p>
+                  <p className="text-[11px] text-slate-500">{currentTarget.role}</p>
+                  <p className="text-[11px] text-slate-400 mt-1">立场 {currentTarget.beliefStance.toFixed(2)}</p>
                 </div>
+              )}
+              {!currentDebate && <p className="text-[12px] text-slate-500">还没有辩论，点击“下一轮”开始。</p>}
+            </div>
+
+            <details className="glass rounded-2xl p-4">
+              <summary className="cursor-pointer text-xs font-semibold text-slate-400 uppercase tracking-widest">高级分析</summary>
+              <div className="mt-3 space-y-4">
+                {metrics && (
+                  <>
+                    <SpiritMarketCap spirit={metrics.spiritMarketCap} real={metrics.realMarketCap} />
+                    <div className="glass rounded-2xl p-5">
+                      <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">教派分布</h3>
+                      <FactionDonut distribution={metrics.factionDistribution} />
+                    </div>
+                  </>
+                )}
+                {agents.length > 0 && <div className="grid grid-cols-1 gap-3">{agents.map((agent) => (
+                  <AgentCard key={agent.id} agent={agent} isActive={latestTarget === agent.id} onApostasy={handleApostasy} />
+                ))}</div>}
+              </div>
+            </details>
+          </aside>
+
+          <section className="lg:col-span-6 space-y-4">
+            <div className="glass rounded-2xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold flex items-center gap-2">{Ic.swords("w-4 h-4 text-slate-400")} 辩论主舞台</h2>
+                {currentDebate && <span className="text-[11px] text-slate-500">Round {currentDebate.round}</span>}
+              </div>
+              {metrics && (
+                <div className="mb-3">
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
+                    <span>叙事主导力</span>
+                    <span className="font-mono text-emerald-300">{Math.round(metrics.narrativeDominance * 100)}%</span>
+                  </div>
+                  <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-700" style={{ width: `${metrics.narrativeDominance * 100}%`, background: "linear-gradient(90deg, #f43f5e, #f59e0b, #00ff88)" }} />
+                  </div>
+                </div>
+              )}
+              <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1 scrollbar-thin">
+                {debates.length === 0 ? (
+                  <div className="rounded-xl border border-white/10 bg-white/[0.02] p-8 text-center">
+                    <p className="text-sm text-slate-400">点击“下一轮”后，这里会显示完整辩论过程。</p>
+                  </div>
+                ) : (
+                  debates.map((debate) => (
+                    <DebateCard
+                      key={`${debate.round}-${debate.prophetId}`}
+                      debate={debate}
+                      agents={agents}
+                      expanded={expandedDebate === debate.round}
+                      onToggle={() => setExpandedDebate(expandedDebate === debate.round ? null : debate.round)}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+          </section>
+
+          <aside className="lg:col-span-3 space-y-4">
+            {metrics && (
+              <div className="grid grid-cols-1 gap-3">
+                <StatCard icon={Ic.check("w-5 h-5")} label="已转化" value={metrics.convertedCount} sub={`${convRate}%`} accent="emerald" />
+                <StatCard icon={Ic.coins("w-5 h-5")} label="总投资" value={metrics.totalInvested} sub="PBT" accent="amber" />
+                <StatCard icon={Ic.sparkles("w-5 h-5")} label="精神市值" value={Math.round(metrics.spiritMarketCap)} accent="violet" />
               </div>
             )}
-
-            {/* #4 Narrative Bias — always visible */}
-            {agents.length > 0 && <NarrativeBiasDisplay agents={agents} />}
-
-            {/* #9 Leaderboard — always visible */}
-            {agents.length > 0 && <Leaderboard agents={agents} />}
-
-            {/* #16 Alliances — always visible */}
+            <NewsTicker news={news.slice(0, 3)} />
+            <ScriptureDisplay scriptures={scriptures.slice(0, 2)} onGenerate={handleGenerateScripture} />
             <AllianceDisplay alliances={alliances} agents={agents} />
-          </div>
-
-          {/* Right: Debate Arena + News + Scriptures */}
-          <div className="lg:col-span-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
-                {Ic.swords("w-4 h-4 text-slate-400")} Debate Arena
-              </h2>
-              {debates.length > 0 && <span className="text-[11px] text-slate-600">{debates.length} debates</span>}
-            </div>
-
-            <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1 scrollbar-thin">
-              {debates.length === 0 ? (
-                <div className="glass rounded-2xl p-12 text-center">
-                  <div className="w-14 h-14 mx-auto mb-4 rounded-xl bg-white/[0.03] flex items-center justify-center animate-float text-emerald-400">
-                    {Ic.zap("w-7 h-7")}
-                  </div>
-                  <p className="text-sm text-slate-400">点击 <span className="text-emerald-400 font-medium">下一轮</span> 开始辩论</p>
-                  <p className="text-[11px] text-slate-600 mt-1">5步辩论协议 · 多策略组合 · 历史案例论证</p>
-                </div>
-              ) : (
-                debates.map((debate) => (
-                  <DebateCard key={`${debate.round}-${debate.prophetId}`} debate={debate} agents={agents}
-                    expanded={expandedDebate === debate.round}
-                    onToggle={() => setExpandedDebate(expandedDebate === debate.round ? null : debate.round)} />
-                ))
-              )}
-            </div>
-
-            {/* #10 News — always visible below debates */}
-            <NewsTicker news={news} />
-
-            {/* #18 Scriptures — always visible with generate button */}
-            <ScriptureDisplay scriptures={scriptures} onGenerate={handleGenerateScripture} />
-          </div>
+          </aside>
         </div>
       </main>
 
