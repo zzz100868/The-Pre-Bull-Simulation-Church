@@ -261,3 +261,35 @@ Simulation / Fiction / Not Financial Advice
 1. 禁止将项目核心信息分散到其他说明文档。
 2. 新功能上线必须同步更新本文件。
 3. 若代码与文档冲突，以代码行为为准，并在本文件修正。
+
+## 13. 一键部署（Render + Vercel）
+
+目标：快速拿到黑客松可提交的公网地址（Link to deployed app）。
+
+### 13.1 后端（Render）
+
+仓库根目录已提供 `render.yaml`，可直接用 Blueprint 部署：
+
+1. 打开 Render -> New + -> Blueprint。
+2. 选择本仓库，Render 会读取 `render.yaml` 自动创建 `prebull-backend`。
+3. 在 Render 面板补充密钥：
+- `OPENAI_API_KEY`
+- `PRIVATE_KEY`（可选，留空则链上 mock）
+4. 部署完成后，验证：
+- `https://<your-render-domain>/api/status`
+
+### 13.2 前端（Vercel）
+
+前端目录已提供 `frontend/vercel.json`。
+
+1. 打开 Vercel -> Add New Project -> 导入本仓库。
+2. Root Directory 选择 `frontend`。
+3. 环境变量设置：
+- `NEXT_PUBLIC_API_URL=https://<your-render-domain>`
+4. 部署完成后，拿到前端公网链接：
+- `https://<your-project>.vercel.app`
+
+### 13.3 表单填写
+
+黑客松表单里的 `Link to deployed app` 填前端地址：
+- `https://<your-project>.vercel.app`
