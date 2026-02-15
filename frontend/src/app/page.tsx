@@ -734,7 +734,7 @@ function DebateCard({ debate, agents, expanded, onToggle }: {
   return (
     <div className={`glass rounded-2xl overflow-hidden transition-all duration-300 animate-fade-in-up ${
       debate.converted ? "animate-border-glow glow-green" : ""} ${debate.apostasized ? "border-rose-500/20" : ""} ${debate.factionDebate ? "border-violet-500/20" : ""}`}>
-      <button onClick={onToggle} className="w-full text-left p-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors">
+      <button onClick={onToggle} className="w-full text-left p-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors hard-edge">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-sm font-mono font-bold text-slate-400">
             {debate.round}
@@ -742,22 +742,22 @@ function DebateCard({ debate, agents, expanded, onToggle }: {
           <div>
             <div className="flex items-center gap-2 text-sm">
               <span className="font-semibold">{prophet?.name}</span>
-              {debate.isMissionary && <span className="text-[9px] px-1 rounded bg-emerald-500/10 text-emerald-400">传教士</span>}
+              {debate.isMissionary && <span className="pixel-tag">传教士</span>}
               <span className="text-slate-600">vs</span>
               <span className="font-semibold">{target?.name}</span>
-              {debate.factionDebate && <span className="text-[9px] px-1 rounded bg-violet-500/10 text-violet-400">教派辩论</span>}
+              {debate.factionDebate && <span className="pixel-tag">教派辩论</span>}
             </div>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-              <span className={`text-[11px] px-1.5 py-0.5 rounded border inline-flex items-center gap-1 ${stratConf.color}`}>
+              <span className={`pixel-tag ${stratConf.color}`}>
                 {stratConf.icon("w-3.5 h-3.5")} {stratConf.label}
               </span>
               {secStratConf && (
-                <span className={`text-[11px] px-1.5 py-0.5 rounded border inline-flex items-center gap-1 opacity-70 ${secStratConf.color}`}>
+                <span className={`pixel-tag opacity-70 ${secStratConf.color}`}>
                   +{secStratConf.label}
                 </span>
               )}
               {debate.historicalCase && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/8 text-cyan-400 border border-cyan-500/15">
+                <span className="pixel-tag">
                   {debate.historicalCase}
                 </span>
               )}
@@ -765,8 +765,8 @@ function DebateCard({ debate, agents, expanded, onToggle }: {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {debate.apostasized && <span className="text-[10px] text-rose-400 flex items-center gap-0.5">{Ic.ghost("w-3 h-3")} 叛教</span>}
-          {debate.investAction && <span className="text-[11px] text-amber-400/80 font-mono">+{debate.investAction.amount.toLocaleString()} PBT</span>}
+          {debate.apostasized && <span className="pixel-tag pixel-tag-danger">{Ic.ghost("w-3 h-3")} 叛教</span>}
+          {debate.investAction && <span className="pixel-tag pixel-tag-warn">+{debate.investAction.amount.toLocaleString()} PBT</span>}
           <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm ${
             debate.converted ? "bg-emerald-500/15 text-emerald-400" : "bg-white/5 text-slate-500"
           }`}>
@@ -785,7 +785,7 @@ function DebateCard({ debate, agents, expanded, onToggle }: {
           {debate.debatePhases && debate.debatePhases.length > 1 && (
             <div className="px-4 pt-3 flex gap-1 flex-wrap">
               {debate.debatePhases.map((phase, i) => (
-                <span key={i} className="text-[9px] px-2 py-0.5 rounded-full bg-white/[0.03] text-slate-500 border border-white/5">
+                <span key={i} className="pixel-tag">
                   {phase}
                 </span>
               ))}
@@ -816,7 +816,7 @@ function DebateCard({ debate, agents, expanded, onToggle }: {
               <p className="text-[10px] text-slate-600 mb-1">使用的反驳模板：</p>
               <div className="flex gap-1 flex-wrap">
                 {debate.counterArguments.map((c, i) => (
-                  <span key={i} className="text-[9px] px-2 py-0.5 rounded bg-rose-500/5 text-rose-400 border border-rose-500/10">{c}</span>
+                  <span key={i} className="pixel-tag pixel-tag-danger">{c}</span>
                 ))}
               </div>
             </div>
@@ -824,7 +824,7 @@ function DebateCard({ debate, agents, expanded, onToggle }: {
 
           {/* Result footer */}
           <div className="px-4 pb-4">
-            <div className="rounded-xl bg-white/[0.02] border border-white/5 p-3 flex flex-wrap gap-x-5 gap-y-1.5 text-[11px] text-slate-500">
+            <div className="hard-edge bg-white/[0.02] border border-white/10 p-3 flex flex-wrap gap-x-5 gap-y-1.5 text-[11px] text-slate-500">
               <div className="flex items-center gap-1.5">
                 <span className="w-3.5 h-3.5 text-emerald-500">{Ic.trendUp("w-3.5 h-3.5")}</span>
                 <span>立场</span>
